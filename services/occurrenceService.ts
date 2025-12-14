@@ -15,7 +15,7 @@ export interface CreateOccurrenceData {
   vehicleNumber?: string;
   description: string;
   vehicleId?: string;
-  createdBy: string; // ← LINHA ADICIONADA (OBRIGATÓRIO)
+  createdBy?: string; // ← Tornado opcional para compatibilidade
 }
 
 export interface Occurrence {
@@ -64,6 +64,7 @@ export interface OccurrenceFilters {
   createdBy?: string;
   vehicleId?: string;
   neighborhood?: string;
+  search?: string;
 }
 
 // Interface para resposta paginada
@@ -72,6 +73,13 @@ export interface OccurrenceListResponse {
   total: number;
   page: number;
   totalPages: number;
+  counts?: {
+    total: number;
+    aberto: number;
+    em_andamento: number;
+    finalizado: number;
+    alerta: number;
+  };
 }
 
 // Interface para resposta da API
@@ -82,86 +90,352 @@ export interface ApiResponse<T> {
   error?: string;
 }
 
-// Interfaces para municípios
-export interface Municipality {
+// Interface para município
+export interface MunicipalityPE {
   id: number;
   name: string;
-  state?: {
-    id: number;
-    uf: string;
-    name: string;
-  };
-  active?: boolean;
-  wasCreated?: boolean;
+}
+
+// Interface para viatura
+export interface Vehicle {
+  id: string;
+  plate: string;
+  name: string;
+  status?: string;
 }
 
 export const occurrenceService = {
+  // ==================== FUNÇÕES PRINCIPAIS ====================
+
+  async createOccurrence(data: CreateOccurrenceData): Promise<ApiResponse<Occurrence>> {
+    try {
+      console.log('📤 Criando ocorrência:', data);
+      
+      const response = await api.post('/occurrences', data);
+      
+      console.log('✅ Ocorrência criada com sucesso:', response.data);
+      
+      return {
+        success: true,
+        data: response.data
+      };
+      
+    } catch (error: any) {
+      console.error('❌ Erro ao criar ocorrência:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+      
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Erro ao criar ocorrência',
+        error: error.code
+      };
+    }
+  },
+
+  async getOccurrenceById(id: string): Promise<ApiResponse<Occurrence>> {
+    try {
+      const response = await api.get(`/occurrences/${id}`);
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error: any) {
+      console.error('Erro ao buscar ocorrência:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Erro ao buscar ocorrência'
+      };
+    }
+  },
+
+  async updateOccurrence(id: string, data: Partial<CreateOccurrenceData>): Promise<ApiResponse<Occurrence>> {
+    try {
+      const response = await api.put(`/occurrences/${id}`, data);
+      return {
+        success: true,
+        data: response.data
+      };
+    } catch (error: any) {
+      console.error('Erro ao atualizar ocorrência:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Erro ao atualizar ocorrência'
+      };
+    }
+  },
+
+  async deleteOccurrence(id: string): Promise<ApiResponse<void>> {
+    try {
+      await api.delete(`/occurrences/${id}`);
+      return { success: true };
+    } catch (error: any) {
+      console.error('Erro ao excluir ocorrência:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Erro ao excluir ocorrência'
+      };
+    }
+  },
+
+  // ==================== FUNÇÕES PARA MUNICÍPIOS ====================
+
+  async getMunicipalitiesPE(): Promise<MunicipalityPE[]> {
+    try {
+      console.log('🏙️ Buscando municípios de PE...');
+      
+      const response = await api.get('/municipalities/pe');
+      
+      // Extrai os dados dependendo do formato da resposta
+      let municipalities: MunicipalityPE[] = [];
+      
+      if (response.data?.data && Array.isArray(response.data.data)) {
+        municipalities = response.data.data;
+      } else if (Array.isArray(response.data)) {
+        municipalities = response.data;
+      } else if (response.data?.municipalities) {
+        municipalities = response.data.municipalities;
+      }
+      
+      console.log(`✅ ${municipalities.length} municípios de PE encontrados`);
+      return municipalities;
+      
+    } catch (error: any) {
+      console.warn('⚠️ Erro ao buscar municípios PE:', error.message);
+      
+      // Fallback para desenvolvimento
+      const fallbackMunicipios: MunicipalityPE[] = [
+        { id: 1, name: 'Recife' },
+        { id: 2, name: 'Olinda' },
+        { id: 3, name: 'Jaboatão dos Guararapes' },
+        { id: 4, name: 'Paulista' },
+        { id: 5, name: 'Cabo de Santo Agostinho' },
+        { id: 6, name: 'Camaragibe' },
+        { id: 7, name: 'São Lourenço da Mata' },
+        { id: 8, name: 'Igarassu' },
+        { id: 9, name: 'Abreu e Lima' },
+        { id: 10, name: 'Goiana' },
+      ];
+      
+      return fallbackMunicipios;
+    }
+  },
+
+  async searchMunicipalitiesPE(term: string): Promise<MunicipalityPE[]> {
+    try {
+      console.log(`🔍 Buscando municípios com termo: ${term}`);
+      
+      const response = await api.get(`/municipalities/pe/search`, {
+        params: { term }
+      });
+      
+      let municipalities: MunicipalityPE[] = [];
+      
+      if (response.data?.data && Array.isArray(response.data.data)) {
+        municipalities = response.data.data;
+      } else if (Array.isArray(response.data)) {
+        municipalities = response.data;
+      } else if (response.data?.municipalities) {
+        municipalities = response.data.municipalities;
+      }
+      
+      console.log(`✅ ${municipalities.length} sugestões encontradas`);
+      return municipalities;
+      
+    } catch (error: any) {
+      console.warn('⚠️ Erro ao buscar sugestões:', error.message);
+      return [];
+    }
+  },
+
+  async findOrCreateMunicipalityPE(name: string): Promise<MunicipalityPE & { wasCreated: boolean }> {
+    try {
+      console.log(`🔄 Buscando ou criando município: "${name}"`);
+      
+      const response = await api.post('/municipalities/pe/find-or-create', { name });
+      
+      let result;
+      
+      if (response.data?.data) {
+        result = response.data.data;
+      } else if (response.data) {
+        result = response.data;
+      } else {
+        throw new Error('Resposta inválida da API');
+      }
+      
+      console.log(`✅ Município processado: ${result.name} (${result.wasCreated ? 'criado' : 'existente'})`);
+      return result;
+      
+    } catch (error: any) {
+      console.error('❌ Erro em findOrCreateMunicipalityPE:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+      
+      // Fallback: cria um objeto local se a API falhar
+      return {
+        id: Date.now(), // ID temporário
+        name: name,
+        wasCreated: true
+      };
+    }
+  },
+
+  // ==================== FUNÇÕES PARA VIATURAS ====================
+
+  async getVehicles(): Promise<Vehicle[]> {
+    try {
+      console.log('🚗 Buscando viaturas...');
+      
+      const response = await api.get('/vehicles', {
+        params: { active: true, available: true }
+      });
+      
+      let vehicles: Vehicle[] = [];
+      
+      if (response.data?.data && Array.isArray(response.data.data)) {
+        vehicles = response.data.data;
+      } else if (Array.isArray(response.data)) {
+        vehicles = response.data;
+      } else if (response.data?.vehicles) {
+        vehicles = response.data.vehicles;
+      }
+      
+      console.log(`✅ ${vehicles.length} viaturas encontradas`);
+      return vehicles;
+      
+    } catch (error: any) {
+      console.warn('⚠️ Erro ao buscar viaturas:', error.message);
+      
+      // Fallback para desenvolvimento
+      const fallbackVehicles: Vehicle[] = [
+        { id: '1', plate: 'ABC-1234', name: 'Viatura 01' },
+        { id: '2', plate: 'DEF-5678', name: 'Viatura 02' },
+        { id: '3', plate: 'GHI-9012', name: 'Viatura 03' },
+      ];
+      
+      return fallbackVehicles;
+    }
+  },
+
+  // ==================== FUNÇÕES PARA IMAGENS ====================
+
+  async uploadImage(occurrenceId: string, imageUri: string): Promise<ApiResponse<any>> {
+    try {
+      console.log(`🖼️ Upload de imagem para ocorrência ${occurrenceId}`);
+      
+      const formData = new FormData();
+      
+      // Cria um objeto File a partir da URI
+      const filename = imageUri.split('/').pop() || 'image.jpg';
+      const match = /\.(\w+)$/.exec(filename);
+      const type = match ? `image/${match[1]}` : 'image/jpeg';
+      
+      formData.append('image', {
+        uri: imageUri,
+        type,
+        name: filename
+      } as any);
+      
+      const response = await api.post(`/occurrences/${occurrenceId}/images`, formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      
+      console.log('✅ Imagem enviada com sucesso');
+      
+      return {
+        success: true,
+        data: response.data
+      };
+      
+    } catch (error: any) {
+      console.error('❌ Erro ao fazer upload da imagem:', error);
+      
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Erro ao enviar imagem'
+      };
+    }
+  },
+
+  async deleteImage(occurrenceId: string, imageId: string): Promise<ApiResponse<void>> {
+    try {
+      await api.delete(`/occurrences/${occurrenceId}/images/${imageId}`);
+      return { success: true };
+    } catch (error: any) {
+      console.error('Erro ao excluir imagem:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Erro ao excluir imagem'
+      };
+    }
+  },
+
   // ==================== FUNÇÕES PARA LISTAGEM ====================
   
-  // Buscar ocorrências com filtros
   async getOccurrences(filters?: OccurrenceFilters): Promise<ApiResponse<OccurrenceListResponse>> {
     try {
-      console.log('🔍 Buscando ocorrências com filtros:', filters);
+      console.log('🔍 Buscando ocorrências...', { filters, baseURL: api.defaults.baseURL });
       
       const params: any = {};
       
-      // Adiciona filtros se existirem
       if (filters) {
         if (filters.page) params.page = filters.page;
         if (filters.limit) params.limit = filters.limit;
-        if (filters.municipality && filters.municipality.trim()) {
-          params.municipality = filters.municipality.trim();
-        }
+        if (filters.municipality) params.municipality = filters.municipality;
         if (filters.status) params.status = filters.status;
         if (filters.type) params.type = filters.type;
-        if (filters.startDate) {
-          // Garantir que é uma data válida
-          const startDate = new Date(filters.startDate);
-          if (!isNaN(startDate.getTime())) {
-            params.startDate = startDate.toISOString();
-          }
-        }
-        if (filters.endDate) {
-          const endDate = new Date(filters.endDate);
-          if (!isNaN(endDate.getTime())) {
-            // Adicionar fim do dia
-            endDate.setHours(23, 59, 59, 999);
-            params.endDate = endDate.toISOString();
-          }
-        }
+        if (filters.startDate) params.startDate = filters.startDate;
+        if (filters.endDate) params.endDate = filters.endDate;
         if (filters.createdBy) params.createdBy = filters.createdBy;
         if (filters.vehicleId) params.vehicleId = filters.vehicleId;
-        if (filters.neighborhood && filters.neighborhood.trim()) {
-          params.neighborhood = filters.neighborhood.trim();
-        }
+        if (filters.neighborhood) params.neighborhood = filters.neighborhood;
+        if (filters.search) params.search = filters.search;
       }
       
-      console.log('📤 Parâmetros da busca:', params);
+      console.log('📤 Parâmetros:', params);
       
       const response = await api.get('/occurrences', { params });
       
-      // Verificar estrutura da resposta
+      console.log('✅ Resposta da API:', {
+        status: response.status,
+        hasData: !!response.data,
+        structure: response.data ? Object.keys(response.data) : 'no data'
+      });
+      
       let occurrences: Occurrence[] = [];
       let total = 0;
       let page = filters?.page || 1;
+      let counts = undefined;
       
-      if (response.data && Array.isArray(response.data)) {
-        // Se a resposta for um array direto
-        occurrences = response.data;
-        total = response.data.length;
+      if (response.data?.success && response.data.data) {
+        const data = response.data.data;
+        occurrences = data.occurrences || [];
+        total = data.total || data.occurrences?.length || 0;
+        page = data.page || page;
+        counts = data.counts;
       } else if (response.data?.occurrences) {
-        // Se a resposta tiver estrutura { occurrences, total, page, totalPages }
         occurrences = response.data.occurrences;
         total = response.data.total || response.data.occurrences.length;
         page = response.data.page || page;
+        counts = response.data.counts;
+      } else if (Array.isArray(response.data)) {
+        occurrences = response.data;
+        total = response.data.length;
       } else if (response.data?.data?.occurrences) {
-        // Se a resposta tiver estrutura { data: { occurrences, total, page } }
         occurrences = response.data.data.occurrences;
         total = response.data.data.total || response.data.data.occurrences.length;
         page = response.data.data.page || page;
+        counts = response.data.data.counts;
       }
       
-      console.log(`✅ ${occurrences.length} ocorrências encontradas (total: ${total})`);
+      console.log(`📋 ${occurrences.length} ocorrências processadas`);
       
       return {
         success: true,
@@ -169,7 +443,8 @@ export const occurrenceService = {
           occurrences,
           total,
           page,
-          totalPages: Math.ceil(total / (filters?.limit || 10))
+          totalPages: Math.ceil(total / (filters?.limit || 10)),
+          counts
         }
       };
       
@@ -177,14 +452,14 @@ export const occurrenceService = {
       console.error('❌ Erro ao buscar ocorrências:', {
         message: error.message,
         status: error.response?.status,
-        data: error.response?.data,
-        url: error.config?.url
+        url: error.config?.url,
+        baseURL: api.defaults.baseURL
       });
       
-      // Retorna estrutura vazia em caso de erro
       return {
         success: false,
         message: error.response?.data?.message || error.message || 'Erro ao carregar ocorrências',
+        error: error.code === 'ECONNABORTED' ? 'timeout' : 'network_error',
         data: {
           occurrences: [],
           total: 0,
@@ -195,218 +470,27 @@ export const occurrenceService = {
     }
   },
 
-  // Buscar ocorrência por ID
-  async getOccurrenceById(id: string): Promise<ApiResponse<Occurrence>> {
-    try {
-      console.log(`🔍 Buscando ocorrência: ${id}`);
-      
-      const response = await api.get(`/occurrences/${id}`);
-      
-      console.log('✅ Ocorrência encontrada');
-      
-      // Ajustar estrutura da resposta
-      let occurrenceData: Occurrence;
-      if (response.data?.data) {
-        occurrenceData = response.data.data;
-      } else if (response.data) {
-        occurrenceData = response.data;
-      } else {
-        throw new Error('Formato de resposta inválido');
-      }
-      
-      return {
-        success: true,
-        data: occurrenceData
-      };
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao buscar ocorrência:', error.message);
-      
-      return {
-        success: false,
-        message: error.response?.data?.message || error.message || 'Erro ao buscar ocorrência'
-      };
-    }
-  },
-
-  // ==================== FUNÇÕES EXISTENTES (com ajustes) ====================
+  // ==================== FUNÇÕES COMPATIBILIDADE ====================
   
-  // Criar nova ocorrência
-  async createOccurrence(data: CreateOccurrenceData): Promise<ApiResponse<Occurrence>> {
+  async getMunicipalities(): Promise<ApiResponse<any[]>> {
     try {
-      console.log('📤 Enviando ocorrência para:', '/occurrences');
-      console.log('Dados:', data);
-
-      const response = await api.post('/occurrences', data);
-
-      if (response.data.success === false) {
-        throw new Error(response.data.message || 'Erro ao criar ocorrência');
-      }
-
-      console.log('✅ Ocorrência criada com sucesso');
+      console.log('🏙️ Buscando municípios...');
       
-      return {
-        success: true,
-        data: response.data.data || response.data
-      };
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao criar ocorrência:', {
-        message: error.message,
-        status: error.response?.status,
-        data: error.response?.data,
-        url: error.config?.url
-      });
-      
-      return {
-        success: false,
-        message: error.response?.data?.message || error.message || 'Erro ao criar ocorrência'
-      };
-    }
-  },
-
-  // Upload de imagem para ocorrência
-  async uploadImage(occurrenceId: string, imageUri: string): Promise<ApiResponse<any>> {
-    try {
-      // Cria FormData para upload
-      const formData = new FormData();
-      
-      // Extrai nome do arquivo da URI
-      const filename = imageUri.split('/').pop() || `image_${Date.now()}.jpg`;
-      
-      // Converte URI para blob (forma simplificada para React Native)
-      formData.append('image', {
-        uri: imageUri,
-        type: 'image/jpeg',
-        name: filename
-      } as any);
-
-      const response = await api.post(`/occurrences/${occurrenceId}/images`, formData, {
-        headers: { 
-          'Content-Type': 'multipart/form-data'
-        },
-        timeout: 30000
-      });
-
-      return {
-        success: true,
-        data: response.data.data || response.data
-      };
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao fazer upload da imagem:', error);
-      
-      return {
-        success: false,
-        message: error.message || 'Erro ao fazer upload da imagem'
-      };
-    }
-  },
-
-  // Atualizar status de uma ocorrência
-  async updateStatus(occurrenceId: string, status: string, reason?: string): Promise<ApiResponse<Occurrence>> {
-    try {
-      console.log(`📝 Atualizando status da ocorrência ${occurrenceId} para: ${status}`);
-      
-      const response = await api.patch(`/occurrences/${occurrenceId}/status`, { 
-        status,
-        reason: reason || 'Atualização via app móvel'
-      });
-      
-      console.log('✅ Status atualizado com sucesso');
-      
-      return {
-        success: true,
-        data: response.data.data || response.data
-      };
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao atualizar status:', error.message);
-      
-      return {
-        success: false,
-        message: error.response?.data?.message || error.message || 'Erro ao atualizar status'
-      };
-    }
-  },
-
-  // Atualizar ocorrência
-  async updateOccurrence(id: string, data: Partial<CreateOccurrenceData>): Promise<ApiResponse<Occurrence>> {
-    try {
-      console.log(`📝 Atualizando ocorrência ${id}`, data);
-      
-      const response = await api.put(`/occurrences/${id}`, data);
-      
-      console.log('✅ Ocorrência atualizada com sucesso');
-      
-      return {
-        success: true,
-        data: response.data.data || response.data
-      };
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao atualizar ocorrência:', error.message);
-      
-      return {
-        success: false,
-        message: error.response?.data?.message || error.message || 'Erro ao atualizar ocorrência'
-      };
-    }
-  },
-
-  // Buscar veículos disponíveis
-  async getVehicles(): Promise<ApiResponse<any[]>> {
-    try {
-      console.log('🚗 Buscando viaturas...');
-      const response = await api.get('/vehicles', {
-        params: { active: true }
-      });
-
-      console.log(`✅ ${response.data?.length || 0} viaturas encontradas`);
-      
-      return {
-        success: true,
-        data: response.data.data || response.data || []
-      };
-      
-    } catch (error: any) {
-      console.warn('⚠️ Erro ao buscar viaturas:', {
-        message: error.message,
-        url: error.config?.url,
-        status: error.response?.status
-      });
-      
-      return {
-        success: false,
-        message: error.message,
-        data: []
-      };
-    }
-  },
-
-  // ==================== FUNÇÕES PARA MUNICÍPIOS DE PERNAMBUCO ====================
-
-  // Buscar municípios de Pernambuco
-  async getMunicipalitiesPE(): Promise<ApiResponse<Municipality[]>> {
-    try {
-      console.log('🔍 Buscando municípios de PE...');
-      
-      // Tenta endpoint principal de municípios
       const response = await api.get('/municipios', {
         params: { active: true }
       });
-
-      console.log(`✅ ${response.data?.length || 0} municípios encontrados`);
       
-      // Se a resposta tiver estrutura {data: [...]}
-      let municipalities: Municipality[] = [];
-      if (response.data && response.data.data) {
+      let municipalities = [];
+      
+      if (response.data?.data) {
         municipalities = response.data.data;
       } else if (Array.isArray(response.data)) {
         municipalities = response.data;
-      } else if (response.data && Array.isArray(response.data.municipalities)) {
+      } else if (response.data?.municipalities) {
         municipalities = response.data.municipalities;
       }
+      
+      console.log(`✅ ${municipalities.length} municípios encontrados`);
       
       return {
         success: true,
@@ -414,190 +498,18 @@ export const occurrenceService = {
       };
       
     } catch (error: any) {
-      console.error('❌ Erro ao buscar municípios de PE:', {
-        message: error.message,
-        url: error.config?.url,
-        status: error.response?.status,
-        data: error.response?.data
-      });
+      console.warn('⚠️ Erro ao buscar municípios:', error.message);
       
-      // Fallback: lista fixa de municípios de PE
-      const municipiosPE: Municipality[] = [
+      const municipiosPE = [
         { id: 1, name: 'Recife' },
         { id: 2, name: 'Olinda' },
         { id: 3, name: 'Jaboatão dos Guararapes' },
-        { id: 4, name: 'Paulista' },
-        { id: 5, name: 'Caruaru' },
-        { id: 6, name: 'Petrolina' },
-        { id: 7, name: 'Garanhuns' },
-        { id: 8, name: 'Vitória de Santo Antão' },
-        { id: 9, name: 'Camaragibe' },
-        { id: 10, name: 'São Lourenço da Mata' },
       ];
-      
-      console.log('🔄 Usando lista fixa de municípios de PE');
       
       return {
         success: true,
         data: municipiosPE
       };
     }
-  },
-
-  // Buscar municípios de PE por termo (para autocomplete)
-  async searchMunicipalitiesPE(query: string): Promise<ApiResponse<Municipality[]>> {
-    try {
-      console.log(`🔍 Buscando municípios de PE: "${query}"`);
-      
-      // Busca todos os municípios de PE primeiro
-      const result = await this.getMunicipalitiesPE();
-      
-      if (!result.success || !result.data) {
-        throw new Error(result.message || 'Erro ao buscar municípios');
-      }
-      
-      // Filtra localmente pelo termo de busca
-      const filtered = result.data.filter(mun => 
-        mun.name.toLowerCase().includes(query.toLowerCase())
-      );
-      
-      console.log(`✅ ${filtered.length} sugestões encontradas`);
-      
-      return {
-        success: true,
-        data: filtered.slice(0, 10) // Limita a 10 resultados
-      };
-      
-    } catch (error: any) {
-      console.warn('Erro ao buscar municípios de PE:', error);
-      
-      return {
-        success: false,
-        message: error.message,
-        data: []
-      };
-    }
-  },
-
-  // Buscar ou criar município em PE
-  async findOrCreateMunicipalityPE(municipalityName: string): Promise<ApiResponse<Municipality>> {
-    try {
-      const normalizedName = municipalityName.trim();
-      console.log(`🔍 Processando município: "${normalizedName}" (PE)`);
-      
-      // 1. Primeiro busca se já existe
-      const result = await this.getMunicipalitiesPE();
-      if (!result.success || !result.data) {
-        throw new Error(result.message || 'Erro ao buscar municípios');
-      }
-      
-      const existing = result.data.find(mun => 
-        mun.name.toLowerCase() === normalizedName.toLowerCase()
-      );
-
-      if (existing) {
-        console.log('✅ Município já existe:', existing.name);
-        return {
-          success: true,
-          data: { ...existing, wasCreated: false }
-        };
-      }
-
-      // 2. Tenta criar via API
-      console.log(`🆕 Tentando criar novo município: ${normalizedName}`);
-      
-      try {
-        const response = await api.post('/municipios', {
-          name: normalizedName,
-          stateUf: 'PE'
-        });
-
-        const newMunicipality = response.data.data || response.data;
-        console.log('✅ Município criado via API:', newMunicipality);
-        
-        return {
-          success: true,
-          data: { ...newMunicipality, wasCreated: true }
-        };
-        
-      } catch (createError: any) {
-        console.warn('Erro ao criar município via API:', createError.message);
-        
-        // Se a API não permitir criação, retorna objeto local
-        const localMunicipality: Municipality = {
-          id: Date.now(),
-          name: normalizedName,
-          wasCreated: true
-        };
-        
-        console.log('✅ Município criado localmente:', localMunicipality.name);
-        
-        return {
-          success: true,
-          data: localMunicipality
-        };
-      }
-      
-    } catch (error: any) {
-      console.error('❌ Erro ao buscar/criar município em PE:', error.message);
-      
-      // Fallback: retorna objeto local mesmo com erro
-      const fallbackMunicipality: Municipality = {
-        id: Date.now(),
-        name: municipalityName.trim(),
-        wasCreated: true
-      };
-      
-      return {
-        success: true,
-        data: fallbackMunicipality
-      };
-    }
-  },
-
-  // Converter localização para município/bairro
-  async geocodeLocation(latitude: number, longitude: number): Promise<ApiResponse<{
-    municipality?: string;
-    neighborhood?: string;
-    address?: string;
-  }>> {
-    try {
-      // Usa serviço de geocodificação (exemplo com OpenStreetMap)
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=18&addressdetails=1`
-      );
-      
-      const data = await response.json();
-      
-      if (data.address) {
-        return {
-          success: true,
-          data: {
-            municipality: data.address.city || data.address.town || data.address.village,
-            neighborhood: data.address.suburb || data.address.neighbourhood,
-            address: data.display_name,
-          }
-        };
-      }
-      
-      return {
-        success: true,
-        data: {}
-      };
-      
-    } catch (error: any) {
-      console.warn('Erro no geocoding:', error);
-      
-      return {
-        success: false,
-        message: error.message,
-        data: {}
-      };
-    }
-  },
-
-  // Função compatível com código antigo
-  async getMunicipalities(): Promise<ApiResponse<any[]>> {
-    return this.getMunicipalitiesPE();
   }
 };

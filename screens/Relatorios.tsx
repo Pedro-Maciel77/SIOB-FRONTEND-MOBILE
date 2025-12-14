@@ -1,3 +1,4 @@
+// /workspaces/SIOB-FRONTEND-MOBILE/screens/Relatorios.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   View, 
@@ -15,13 +16,30 @@ import {
   Card, 
   ActivityIndicator,
 } from 'react-native-paper';
-import Svg, { Circle, G, Path, Rect, Defs, LinearGradient, Stop, Text as SvgText } from 'react-native-svg';
+import Svg, { Circle, G, Path, Defs, LinearGradient, Stop, Text as SvgText } from 'react-native-svg';
 import { darkTheme } from '../theme/darkTheme';
 import { Ionicons } from '@expo/vector-icons';
 import AnimatedDrawer from '../components/AnimatedDrawer';
 import { statsService, DashboardStats } from '../services/statsService';
 
 const { width } = Dimensions.get('window');
+
+// FUNÇÕES DE SANITIZAÇÃO - ADICIONADAS PARA EVITAR NaN
+const sanitizeNumber = (value: any): number => {
+  if (value === null || value === undefined || value === '') return 0;
+  const num = Number(value);
+  return isNaN(num) || !isFinite(num) ? 0 : Math.max(0, num);
+};
+
+const safeMax = (arr: number[]): number => {
+  const validNumbers = arr.filter(n => !isNaN(n) && isFinite(n));
+  return validNumbers.length > 0 ? Math.max(...validNumbers, 1) : 1;
+};
+
+const safeMin = (arr: number[]): number => {
+  const validNumbers = arr.filter(n => !isNaN(n) && isFinite(n));
+  return validNumbers.length > 0 ? Math.min(...validNumbers, 0) : 0;
+};
 
 const OCCURRENCE_TYPES = [
   { key: 'acidente', label: 'Acidentes', color: '#29B6F6' },
@@ -36,12 +54,6 @@ const OCCURRENCE_STATUS = [
   { value: 'em_andamento', label: 'Em Andamento', color: '#FFB74D' },
   { value: 'finalizado', label: 'Finalizados', color: '#4CAF50' },
   { value: 'alerta', label: 'Alerta', color: '#9C27B0' },
-];
-
-const PERIODS = [
-  { value: 'week', label: 'Semana' },
-  { value: 'month', label: 'Mês' },
-  { value: 'year', label: 'Ano' },
 ];
 
 const DEFAULT_STATS: DashboardStats = {
@@ -70,63 +82,117 @@ export default function Relatorios({ navigation }: any) {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [stats, setStats] = useState<DashboardStats>(DEFAULT_STATS);
-  const [selectedPeriod, setSelectedPeriod] = useState('week');
-  const [periodData, setPeriodData] = useState<number[]>([]);
   const [hasError, setHasError] = useState(false);
+  const [connectionTested, setConnectionTested] = useState(false);
+
+  // Função para testar conexão com a API
+  const testAPIConnection = useCallback(async () => {
+    try {
+      console.log('🔍 Testando conexão com API...');
+      const result = await statsService.testConnection();
+      console.log('✅ Resultado do teste:', result);
+      setConnectionTested(true);
+      return result.success;
+    } catch (error) {
+      console.error('❌ Erro no teste de conexão:', error);
+      return false;
+    }
+  }, []);
 
   const loadStats = useCallback(async () => {
     try {
       setLoading(true);
       setHasError(false);
       
-      const data = await statsService.getDashboardStats();
+      console.log('🔄 Carregando dados do banco real...');
       
-      if (data) {
-        setStats(data);
-        const periodData = await statsService.getOccurrencesByPeriod(selectedPeriod as any);
-        const formattedData = formatPeriodData(periodData, data.occurrences?.total || 0);
-        setPeriodData(formattedData);
-      } else {
-        setStats(DEFAULT_STATS);
-        setPeriodData(getDefaultPeriodData(selectedPeriod));
+      // Primeiro testa a conexão se ainda não testou
+      if (!connectionTested) {
+        const connected = await testAPIConnection();
+        if (!connected) {
+          throw new Error('Não foi possível conectar ao servidor');
+        }
       }
       
+      // Busca dados REAIS do banco
+      const data = await statsService.getDashboardStats();
+      
+      console.log('✅ Dados recebidos do banco:', {
+        total: data.occurrences.total,
+        hasData: data.occurrences.total > 0,
+        byType: data.occurrences.byType,
+        byStatus: data.occurrences.byStatus
+      });
+      
+      setStats(data);
+      
     } catch (error: any) {
-      console.error('Erro ao carregar estatísticas:', error);
+      console.error('❌ Erro ao carregar estatísticas:', {
+        message: error.message,
+        code: error.code
+      });
+      
       setHasError(true);
-      Alert.alert('Atenção', 'Não foi possível carregar as estatísticas.');
+      
+      Alert.alert(
+        'Erro de Conexão',
+        'Não foi possível conectar ao servidor. Verifique sua conexão com a internet.',
+        [
+          { 
+            text: 'Tentar Novamente', 
+            onPress: () => loadStats(),
+            style: 'default'
+          },
+          { 
+            text: 'Usar Dados Offline', 
+            onPress: () => {
+              // Mantém dados vazios para modo offline
+              setStats(DEFAULT_STATS);
+            },
+            style: 'cancel'
+          }
+        ]
+      );
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [selectedPeriod]);
+  }, [connectionTested, testAPIConnection]);
 
   useEffect(() => {
     loadStats();
   }, [loadStats]);
 
-  const formatPeriodData = (data: any[], total: number): number[] => {
-    if (!data || data.length === 0) {
-      return Array(selectedPeriod === 'week' ? 7 : 
-                   selectedPeriod === 'month' ? 30 : 12).fill(0);
+  // Log para debug quando os dados mudam
+  useEffect(() => {
+    if (stats.occurrences.total > 0) {
+      console.log('📈 Dados atualizados no estado:', {
+        total: stats.occurrences.total,
+        tipos: stats.occurrences.byType,
+        status: stats.occurrences.byStatus
+      });
     }
-    
-    return data.map(item => item.count || 0);
-  };
-
-  const getDefaultPeriodData = (period: string): number[] => {
-    return Array(period === 'week' ? 7 : 
-                 period === 'month' ? 30 : 12).fill(0);
-  };
+  }, [stats]);
 
   const onRefresh = useCallback(() => {
+    console.log('🔄 Pull to refresh acionado');
     setRefreshing(true);
     loadStats();
   }, [loadStats]);
 
   const getDonutData = () => {
     const typeData = stats.occurrences.byType;
-    const hasData = Object.values(typeData).some(value => Number(value) > 0);
+    
+    // SANITIZA TODOS OS VALORES
+    const safeTypeData = {
+      acidente: sanitizeNumber(typeData.acidente),
+      resgate: sanitizeNumber(typeData.resgate),
+      incendio: sanitizeNumber(typeData.incendio),
+      atropelamento: sanitizeNumber(typeData.atropelamento),
+      outros: sanitizeNumber(typeData.outros),
+    };
+    
+    const hasData = Object.values(safeTypeData).some(value => value > 0);
     
     if (!hasData) {
       return OCCURRENCE_TYPES.map(type => ({ 
@@ -137,8 +203,27 @@ export default function Relatorios({ navigation }: any) {
 
     return OCCURRENCE_TYPES.map(type => ({
       ...type,
-      value: Number(typeData[type.key]) || 0,
+      value: safeTypeData[type.key] || 0,
     }));
+  };
+
+  // Função para debug da API
+  const debugAPI = async () => {
+    try {
+      console.log('🔧 Iniciando debug da API...');
+      const debugResult = await statsService.testConnection();
+      console.log('🔍 Resultado do debug:', debugResult);
+      
+      Alert.alert(
+        'Debug API',
+        `Status: ${debugResult.success ? '✅ Conectado' : '❌ Erro'}\n` +
+        `Mensagem: ${debugResult.message || 'Sem mensagem'}\n` +
+        `Código: ${debugResult.status || 'N/A'}`,
+        [{ text: 'OK' }]
+      );
+    } catch (error) {
+      console.error('❌ Erro no debug:', error);
+    }
   };
 
   if (loading && !refreshing) {
@@ -147,15 +232,23 @@ export default function Relatorios({ navigation }: any) {
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={darkTheme.colors.primary} />
           <Text style={{ marginTop: 16, color: darkTheme.colors.onSurface }}>
-            Carregando estatísticas...
+            Conectando ao banco de dados...
           </Text>
+          <TouchableOpacity 
+            onPress={debugAPI}
+            style={[styles.debugButton, { marginTop: 20 }]}
+          >
+            <Text style={{ color: darkTheme.colors.primary, fontSize: 12 }}>
+              Verificar conexão
+            </Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
   const donutData = getDonutData();
-  const totalOcorrencias = stats.occurrences.total;
+  const totalOcorrencias = sanitizeNumber(stats.occurrences.total);
   const statusCounts = stats.occurrences.byStatus;
 
   return (
@@ -171,16 +264,25 @@ export default function Relatorios({ navigation }: any) {
           Dashboard
         </Text>
 
-        <Button
-          mode="contained"
-          onPress={() => navigation.navigate('EnviarRelatorio')}
-          icon="file-download"
-          style={styles.generateButton}
-          contentStyle={{ height: 36 }}
-          labelStyle={{ color: '#fff', fontWeight: '600' }}
-        >
-          Gerar relatório
-        </Button>
+        <View style={styles.headerButtons}>
+          <TouchableOpacity 
+            onPress={debugAPI}
+            style={styles.debugHeaderButton}
+          >
+            <Ionicons name="bug-outline" size={20} color={darkTheme.colors.onSurfaceVariant} />
+          </TouchableOpacity>
+          
+          <Button
+            mode="contained"
+            onPress={() => navigation.navigate('EnviarRelatorio')}
+            icon="file-download"
+            style={styles.generateButton}
+            contentStyle={{ height: 36 }}
+            labelStyle={{ color: '#fff', fontWeight: '600' }}
+          >
+            Gerar relatório
+          </Button>
+        </View>
       </View>
 
       <ScrollView 
@@ -191,6 +293,8 @@ export default function Relatorios({ navigation }: any) {
             onRefresh={onRefresh}
             colors={[darkTheme.colors.primary]}
             tintColor={darkTheme.colors.primary}
+            title="Atualizando dados..."
+            titleColor={darkTheme.colors.onSurfaceVariant}
           />
         }
       >
@@ -199,38 +303,76 @@ export default function Relatorios({ navigation }: any) {
             <Card.Content style={styles.errorContent}>
               <Ionicons name="warning" size={24} color="#FF5252" />
               <Text style={[styles.errorText, { color: '#D32F2F' }]}>
-                Não foi possível carregar as estatísticas. Puxe para atualizar.
+                Não foi possível conectar ao servidor. Puxe para tentar novamente.
               </Text>
+              <TouchableOpacity 
+                onPress={loadStats}
+                style={styles.retryButton}
+              >
+                <Text style={styles.retryButtonText}>Tentar Novamente</Text>
+              </TouchableOpacity>
             </Card.Content>
           </Card>
         )}
 
+        {/* Cartão de Status */}
         <Card style={[styles.card, { backgroundColor: darkTheme.colors.surface, borderColor: darkTheme.colors.outline }]}>
           <Card.Content>
-            <Text style={[styles.cardTitle, { color: darkTheme.colors.onSurface }]}>
-              Total de Ocorrências:{' '}
-              <Text style={{ fontWeight: '700', color: darkTheme.colors.primary }}>
-                {totalOcorrencias}
+            <View style={styles.cardHeader}>
+              <Text style={[styles.cardTitle, { color: darkTheme.colors.onSurface }]}>
+                Total de Ocorrências
               </Text>
+              <View style={styles.totalBadge}>
+                <Text style={[styles.totalNumber, { color: darkTheme.colors.primary }]}>
+                  {totalOcorrencias}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={[styles.cardSubtitle, { color: darkTheme.colors.onSurfaceVariant }]}>
+              Distribuição por status
             </Text>
 
             <View style={styles.statusRow}>
-              {OCCURRENCE_STATUS.map((status, index) => (
-                <View key={`status-${index}-${status.value}`} style={styles.statusItem}>
-                  <Text style={[styles.statusLabel, { color: darkTheme.colors.onSurfaceVariant }]}>
-                    {status.label}:
-                  </Text>
-                  <Text style={[styles.statusValue, { color: status.color, fontWeight: '700' }]}>
-                    {statusCounts[status.value] || 0}
-                  </Text>
-                </View>
-              ))}
+              {OCCURRENCE_STATUS.map((status, index) => {
+                const count = sanitizeNumber(statusCounts[status.value]);
+                return (
+                  <View key={`status-${index}-${status.value}`} style={styles.statusItem}>
+                    <View style={[styles.statusDot, { backgroundColor: status.color }]} />
+                    <View style={styles.statusContent}>
+                      <Text style={[styles.statusLabel, { color: darkTheme.colors.onSurfaceVariant }]}>
+                        {status.label}
+                      </Text>
+                      <Text style={[styles.statusValue, { color: status.color, fontWeight: '700' }]}>
+                        {count}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })}
             </View>
+            
+            {/* Mostrar taxa de resolução se houver dados */}
+            {stats.summary && totalOcorrencias > 0 && (
+              <View style={styles.resolutionContainer}>
+                <Text style={[styles.resolutionText, { color: darkTheme.colors.onSurfaceVariant }]}>
+                  Taxa de resolução: <Text style={{ color: darkTheme.colors.primary, fontWeight: '700' }}>
+                    {stats.summary.resolutionRate}
+                  </Text>
+                </Text>
+                <Text style={[styles.resolutionText, { color: darkTheme.colors.onSurfaceVariant }]}>
+                  Tempo médio: <Text style={{ color: darkTheme.colors.primary, fontWeight: '700' }}>
+                    {stats.summary.averageResponseTime}
+                  </Text>
+                </Text>
+              </View>
+            )}
           </Card.Content>
         </Card>
 
         <View style={{ height: 32 }} />
 
+        {/* Gráfico de Donut */}
         <View style={styles.centerColumn}>
           <DonutChart 
             data={donutData} 
@@ -242,6 +384,12 @@ export default function Relatorios({ navigation }: any) {
           <Text style={[styles.centerLabel, { color: darkTheme.colors.onSurface }]}>
             Distribuição por Tipo
           </Text>
+          
+          {totalOcorrencias === 0 && !loading && (
+            <Text style={[styles.noDataMessage, { color: darkTheme.colors.onSurfaceVariant }]}>
+              Nenhuma ocorrência registrada
+            </Text>
+          )}
 
           <View style={{ height: 16 }} />
 
@@ -260,64 +408,49 @@ export default function Relatorios({ navigation }: any) {
           </View>
         </View>
 
-        <View style={{ height: 24 }} />
-
-        <Card style={[styles.card, { backgroundColor: darkTheme.colors.surface, borderColor: darkTheme.colors.outline }]}>
-          <Card.Content>
-            <View style={styles.cardHeaderRow}>
-              <Text style={[styles.cardSectionTitle, { color: darkTheme.colors.onSurface }]}>
-                Ocorrências por Período
-              </Text>
-              
-              <View style={styles.periodSelector}>
-                {PERIODS.map((period, index) => (
-                  <TouchableOpacity
-                    key={`period-${index}-${period.value}`}
-                    style={[
-                      styles.periodButton,
-                      selectedPeriod === period.value && { 
-                        backgroundColor: darkTheme.colors.primary 
-                      }
-                    ]}
-                    onPress={() => {
-                      setSelectedPeriod(period.value);
-                      setPeriodData(getDefaultPeriodData(period.value));
-                      loadStats();
-                    }}
-                  >
-                    <Text style={[
-                      styles.periodButtonText,
-                      selectedPeriod === period.value 
-                        ? { color: '#FFFFFF' } 
-                        : { color: darkTheme.colors.onSurface }
-                    ]}>
-                      {period.label}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            <View style={{ height: 140, marginTop: 16 }}>
-              <SparklineChart 
-                data={periodData} 
-                colorFrom="#E53935" 
-                colorTo="#8E2323"
-                period={selectedPeriod}
-                hasData={totalOcorrencias > 0}
-              />
-            </View>
-
-            {totalOcorrencias === 0 && !loading && (
-              <View style={styles.noDataContainer}>
-                <Text style={[styles.noDataText, { color: darkTheme.colors.onSurfaceVariant }]}>
-                  Nenhuma ocorrência registrada no período
+        {/* Municípios (se houver dados) */}
+        {stats.occurrences.byMunicipality.length > 0 && (
+          <>
+            <View style={{ height: 24 }} />
+            
+            <Card style={[styles.card, { backgroundColor: darkTheme.colors.surface, borderColor: darkTheme.colors.outline }]}>
+              <Card.Content>
+                <Text style={[styles.cardSectionTitle, { color: darkTheme.colors.onSurface }]}>
+                  Top Municípios
                 </Text>
-              </View>
-            )}
-          </Card.Content>
-        </Card>
+                
+                <View style={styles.municipalityContainer}>
+                  {stats.occurrences.byMunicipality.slice(0, 5).map((municipality, index) => (
+                    <View key={`municipality-${index}`} style={styles.municipalityItem}>
+                      <View style={styles.municipalityRank}>
+                        <Text style={[styles.rankText, { color: darkTheme.colors.onSurfaceVariant }]}>
+                          #{index + 1}
+                        </Text>
+                      </View>
+                      <View style={styles.municipalityContent}>
+                        <Text style={[styles.municipalityName, { color: darkTheme.colors.onSurface }]}>
+                          {municipality.name}
+                        </Text>
+                        <Text style={[styles.municipalityCount, { color: darkTheme.colors.primary }]}>
+                          {municipality.count} ocorrências
+                        </Text>
+                      </View>
+                      <View style={styles.municipalityPercentage}>
+                        <Text style={[styles.percentageText, { color: darkTheme.colors.onSurfaceVariant }]}>
+                          {totalOcorrencias > 0 
+                            ? `${((municipality.count / totalOcorrencias) * 100).toFixed(1)}%` 
+                            : '0%'}
+                        </Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              </Card.Content>
+            </Card>
+          </>
+        )}
 
+        {/* Estatísticas de Usuários (se houver) */}
         {stats.users && stats.users.total > 0 && (
           <>
             <View style={{ height: 24 }} />
@@ -331,7 +464,7 @@ export default function Relatorios({ navigation }: any) {
                 <View style={styles.userStatsContainer}>
                   <View style={styles.statCard}>
                     <Text style={[styles.statNumber, { color: darkTheme.colors.primary }]}>
-                      {stats.users.total}
+                      {sanitizeNumber(stats.users.total)}
                     </Text>
                     <Text style={[styles.statLabel, { color: darkTheme.colors.onSurfaceVariant }]}>
                       Total de Usuários
@@ -345,7 +478,7 @@ export default function Relatorios({ navigation }: any) {
                           {role.charAt(0).toUpperCase() + role.slice(1)}:
                         </Text>
                         <Text style={[styles.roleCount, { color: darkTheme.colors.primary, fontWeight: '700' }]}>
-                          {count}
+                          {sanitizeNumber(count)}
                         </Text>
                       </View>
                     ))}
@@ -353,6 +486,21 @@ export default function Relatorios({ navigation }: any) {
                 </View>
               </Card.Content>
             </Card>
+          </>
+        )}
+
+        {/* Botão de debug (apenas desenvolvimento) */}
+        {__DEV__ && (
+          <>
+            <View style={{ height: 24 }} />
+            <TouchableOpacity 
+              onPress={debugAPI}
+              style={[styles.debugButton, { alignSelf: 'center' }]}
+            >
+              <Text style={{ color: darkTheme.colors.onSurfaceVariant, fontSize: 12 }}>
+                Debug API Connection
+              </Text>
+            </TouchableOpacity>
           </>
         )}
 
@@ -376,14 +524,21 @@ function DonutChart({
   const radius = (size - strokeWidth) / 2;
   const center = size / 2;
   const circumference = 2 * Math.PI * radius;
-  const total = data.reduce((s, d) => s + d.value, 0);
+  
+  // SANITIZA OS VALORES
+  const safeData = data.map(item => ({
+    ...item,
+    value: sanitizeNumber(item.value)
+  }));
+  
+  const total = safeData.reduce((s, d) => s + d.value, 0);
 
   let cumulative = 0;
 
   return (
     <Svg width={size} height={size}>
       <G rotation={-90} origin={`${center}, ${center}`}>
-        {data.map((slice, index) => {
+        {safeData.map((slice, index) => {
           const fraction = slice.value / (total || 1);
           const dash = [fraction * circumference, (1 - fraction) * circumference];
           const rotate = cumulative * 360;
@@ -398,7 +553,7 @@ function DonutChart({
                 stroke={hasData ? slice.color : '#555'}
                 strokeWidth={strokeWidth}
                 strokeLinecap="butt"
-                strokeDasharray={dash}
+                strokeDasharray={dash.map(n => n.toFixed(2)).join(',')}
                 fill="transparent"
                 opacity={hasData ? 1 : 0.3}
               />
@@ -438,75 +593,6 @@ function DonutChart({
   );
 }
 
-function SparklineChart({ 
-  data, 
-  colorFrom = '#E53935', 
-  colorTo = '#8E2323',
-  period = 'week',
-  hasData = true
-}: { 
-  data: number[]; 
-  colorFrom?: string; 
-  colorTo?: string;
-  period?: string;
-  hasData?: boolean;
-}) {
-  const w = width - 64;
-  const h = 120;
-  const padding = 8;
-  const max = Math.max(...data, 1);
-  const min = Math.min(...data, 0);
-
-  const points = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * (w - padding * 2) + padding;
-    const y = h - ((v - min) / (max - min || 1)) * (h - padding * 2) - padding;
-    return { x, y };
-  });
-
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
-  const areaPath = `${linePath} L ${w - padding} ${h - padding} L ${padding} ${h - padding} Z`;
-
-  const peakIndex = data.indexOf(Math.max(...data));
-  const peak = points[peakIndex];
-
-  return (
-    <Svg width={w} height={h}>
-      <Defs>
-        <LinearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={hasData ? colorFrom : '#555'} stopOpacity={hasData ? 0.45 : 0.2} />
-          <Stop offset="1" stopColor={hasData ? colorTo : '#333'} stopOpacity={hasData ? 0.05 : 0.1} />
-        </LinearGradient>
-      </Defs>
-
-      <Path d={areaPath} fill="url(#grad)" />
-
-      <Path 
-        d={linePath} 
-        fill="none" 
-        stroke={hasData ? colorFrom : '#777'} 
-        strokeWidth={2.4} 
-        strokeLinecap="round" 
-        strokeLinejoin="round"
-        opacity={hasData ? 1 : 0.5}
-      />
-
-      {hasData && peak && (
-        <>
-          <Circle cx={peak.x} cy={peak.y} r={6} fill="#fff" />
-          <Circle cx={peak.x} cy={peak.y} r={4} fill={colorFrom} />
-        </>
-      )}
-
-      {period === 'week' && (
-        <>
-          <SvgText x={padding} y={h - 4} fontSize="10" fill="#666" textAnchor="start">Seg</SvgText>
-          <SvgText x={w - padding} y={h - 4} fontSize="10" fill="#666" textAnchor="end">Dom</SvgText>
-        </>
-      )}
-    </Svg>
-  );
-}
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -515,6 +601,14 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
+  },
+  debugButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#555',
   },
   header: {
     height: 64,
@@ -523,6 +617,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderBottomWidth: 1,
+  },
+  headerButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  debugHeaderButton: {
+    padding: 6,
   },
   iconButton: {
     width: 36,
@@ -551,36 +653,95 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   errorContent: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 16,
   },
   errorText: {
-    marginLeft: 12,
+    marginTop: 12,
     fontSize: 14,
-    flex: 1,
-  },
-  cardTitle: {
-    fontSize: 16,
+    textAlign: 'center',
     marginBottom: 12,
   },
-  statusRow: {
+  retryButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#FF5252',
+    borderRadius: 6,
     marginTop: 8,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  cardTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  totalBadge: {
+    backgroundColor: 'rgba(229, 57, 53, 0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  totalNumber: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  cardSubtitle: {
+    fontSize: 14,
+    marginBottom: 16,
+  },
+  statusRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     flexWrap: 'wrap',
+    gap: 12,
   },
   statusItem: {
-    width: '24%',
+    flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    minWidth: '48%',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  statusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  statusContent: {
+    flex: 1,
   },
   statusLabel: {
     fontSize: 12,
-    textAlign: 'center',
+    marginBottom: 2,
   },
   statusValue: {
-    fontSize: 14,
-    marginTop: 4,
+    fontSize: 16,
+  },
+  resolutionContainer: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  resolutionText: {
+    fontSize: 13,
   },
   centerColumn: {
     alignItems: 'center',
@@ -589,6 +750,11 @@ const styles = StyleSheet.create({
   centerLabel: {
     fontSize: 16,
     fontWeight: '700',
+  },
+  noDataMessage: {
+    fontSize: 14,
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   legendRow: {
     marginTop: 8,
@@ -619,30 +785,47 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
-  cardHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-  },
   cardSectionTitle: {
     fontSize: 16,
     fontWeight: '700',
   },
-  periodSelector: {
+  municipalityContainer: {
+    marginTop: 12,
+  },
+  municipalityItem: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  periodButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#444',
+  municipalityRank: {
+    width: 32,
+    alignItems: 'center',
   },
-  periodButtonText: {
+  rankText: {
     fontSize: 12,
+    fontWeight: '700',
+  },
+  municipalityContent: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  municipalityName: {
+    fontSize: 14,
     fontWeight: '500',
+    marginBottom: 2,
+  },
+  municipalityCount: {
+    fontSize: 12,
+  },
+  municipalityPercentage: {
+    width: 48,
+    alignItems: 'flex-end',
+  },
+  percentageText: {
+    fontSize: 12,
+    fontWeight: '600',
   },
   userStatsContainer: {
     marginTop: 12,
@@ -682,14 +865,5 @@ const styles = StyleSheet.create({
   },
   roleCount: {
     fontSize: 14,
-  },
-  noDataContainer: {
-    alignItems: 'center',
-    marginTop: 20,
-    padding: 16,
-  },
-  noDataText: {
-    fontSize: 14,
-    textAlign: 'center',
   },
 });

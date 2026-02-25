@@ -1,0 +1,1 @@
+Siob (Sistema Integrado de Ocorrências dos Bombeiros) é um projeto onde nossa equipe precisou criar um app para os bombeiros onde por via do celular conseguisse registrar uma ocorrência em tempo real. Aqui esta o front-End do nosso projeto

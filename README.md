@@ -32,8 +32,6 @@ React / React Native
 
 JavaScript / TypeScript
 
-HTML5 & CSS3
-
 🎯 Objetivo:
 
 O principal objetivo do SIOB é oferecer uma solução digital eficiente para o registro de ocorrências, substituindo processos manuais e trazendo mais agilidade e confiabilidade às operações.

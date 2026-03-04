@@ -3,7 +3,7 @@ O SIOB (Sistema Integrado de Ocorrências dos Bombeiros) é uma aplicação dese
 
 Este repositório contém o Front-End do projeto.
 
-📱 Sobre o Projeto
+📱 Sobre o Projeto:
 
 O SIOB foi criado para permitir que bombeiros registrem ocorrências em tempo real, diretamente pelo celular, de forma prática, rápida e segura.
 A aplicação busca:
@@ -16,18 +16,24 @@ A aplicação busca:
 
 ✅ Melhorar a comunicação operacional
 
-🚀 Funcionalidades
+🚀 Funcionalidades:
 
 Registro de novas ocorrências
+
 Preenchimento de dados em tempo real
+
 Interface otimizada para dispositivos móveis
-Validação de campos
+
 Organização estruturada das informações
 
-🛠️ Tecnologias Utilizadas
+🛠️ Tecnologias Utilizadas:
+
 React / React Native
+
 JavaScript / TypeScript
+
 HTML5 & CSS3
 
-🎯 Objetivo
+🎯 Objetivo:
+
 O principal objetivo do SIOB é oferecer uma solução digital eficiente para o registro de ocorrências, substituindo processos manuais e trazendo mais agilidade e confiabilidade às operações.

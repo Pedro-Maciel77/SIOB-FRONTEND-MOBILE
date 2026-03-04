@@ -7,12 +7,17 @@ Este repositório contém o Front-End do projeto.
 
 O SIOB foi criado para permitir que bombeiros registrem ocorrências em tempo real, diretamente pelo celular, de forma prática, rápida e segura.
 A aplicação busca:
+
 ✅ Agilizar o registro de ocorrências
+
 ✅ Reduzir erros no preenchimento de informações
+
 ✅ Centralizar dados importantes
+
 ✅ Melhorar a comunicação operacional
 
 🚀 Funcionalidades
+
 Registro de novas ocorrências
 Preenchimento de dados em tempo real
 Interface otimizada para dispositivos móveis
